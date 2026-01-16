@@ -132,7 +132,136 @@ hist(result$T_perm, breaks = 30,
 abline(v = result$T_obs, col = "red", lwd = 2)
 ```
 
+
+## Alternative method
+
 ```{r}
+
+# Helper Functions
+quad_form_cor <- function(w, z, pair_struct) {
+  i   <- pair_struct$i
+  j   <- pair_struct$j
+  rho <- pair_struct$rho
+
+  wz <- w * z
+  sum_wz <- sum(wz)
+
+  spots   <- c(i, j)
+  w_long  <- rep(w, 2)
+  z_long  <- rep(z, 2)
+  wz_long <- rep(wz, 2)
+
+  Sw  <- rowsum(w_long,  spots)
+  Sz  <- rowsum(z_long,  spots)
+  Swz <- rowsum(wz_long, spots)
+
+  C <- sum(Sw * Sz) - sum(Swz)
+
+  as.numeric(sum_wz + rho * C)
+}
+
+build_pair_structure <- function(S, rho = 0.25, scale_d2 = FALSE) {
+  S <- as.matrix(S)
+  n <- nrow(S)
+  stopifnot(ncol(S) == 2)
+
+  pairs <- utils::combn(n, 2)
+  i <- pairs[1, ]
+  j <- pairs[2, ]
+  m <- ncol(pairs)
+
+  d2 <- rowSums((S[i, , drop = FALSE] - S[j, , drop = FALSE])^2)
+
+  # optional scaling to prevent numerical explosion (keeps sign positive)
+  if (scale_d2) d2 <- d2 / max(d2)
+
+  ps <- list(i = i, j = j, d2 = d2, m = m, n = n, rho = rho)
+  ps$denom_d2 <- quad_form_cor(d2, d2, ps)
+  ps
+}
+```
+
+
+```{r}
+gee_svg_one_gene_perm <- function(
+  y,
+  pair_struct,
+  B = 500,
+  seed = NULL
+) {
+  if (!is.null(seed)) set.seed(seed)
+
+  i <- pair_struct$i
+  j <- pair_struct$j
+  d2 <- pair_struct$d2
+  n  <- pair_struct$n
+
+  stopifnot(length(y) == n)
+
+  # -------------------------------
+  # Observed beta
+  # -------------------------------
+  delta2_obs <- (y[i] - y[j])^2
+  delta2_obs_centered <- delta2_obs - mean(delta2_obs)
+  num_obs <- quad_form_cor(d2, delta2_obs_centered, pair_struct)
+  beta_obs <- num_obs / pair_struct$denom_d2
+
+  # -------------------------------
+  # Permutation null
+  # -------------------------------
+  beta_perm <- numeric(B)
+
+  for (b in seq_len(B)) {
+    idx <- sample(n, n, replace = FALSE)
+    yp  <- y[idx]
+
+    delta2_p <- (yp[i] - yp[j])^2
+    delta2_p_centered <- delta2_p - mean(delta2_p)
+    num_p <- quad_form_cor(d2, delta2_p_centered, pair_struct)
+    beta_perm[b] <- num_p / pair_struct$denom_d2
+  }
+
+  # -------------------------------
+  # permutation p-value
+  # -------------------------------
+  
+  # mean deviation
+  mu_perm <- mean(beta_perm)
+  p_value <- (1 + sum(abs(beta_perm-mu_perm) >= abs(beta_obs - mu_perm)))/ (B + 1)
+  
+
+  list(
+    beta_obs  = beta_obs,
+    beta_perm = beta_perm,
+    p_value    = p_value
+  )
+}
+
+```
+
+
+
+```{r}
+pair_struct <- build_pair_structure(S, rho = 0.25, scale_d2 = TRUE)   # should be very quick now
+
+system.time(
+  result2 <- gee_svg_one_gene_perm(
+  y = Y["Nrgn", ],
+  pair_struct = pair_struct,
+  B = 500,
+  seed = 123
+))
+
+```
+
+
+```{r}
+result2$beta_obs
+result2$p_value
+hist(result2$beta_perm, breaks = 30,
+     main = "Permutation null for T stat",
+     xlab = "T stat")
+abline(v = result2$beta_obs, col = "red", lwd = 2)
 
 ```
 
