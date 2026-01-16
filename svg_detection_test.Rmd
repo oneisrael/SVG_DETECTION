@@ -1,0 +1,138 @@
+---
+title: "SVG Detection"
+author: "Daniel Israel Kakou"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(STANCE) # for benchmark data mOB
+```
+
+
+# Detecting SVGs
+
+Suppose that we have spatial transcriptomics expression data for $q$ genes at $n$ spots (or pixels) in a two-dimensional tissue. The spatial coordinates of the $i$th spot are denoted by
+
+$$
+\mathbf{s}_i = (s_{i1}, s_{i2})^{\top}, \quad i = 1, \ldots, n,
+$$
+
+where the superscript $\top$ denotes vector transpose and $\mathbf{s}_i$ is a $2 \times 1$ vector.
+
+For a particular gene, let $y_i$ denote the gene expression value at the $i$th spot. The values $y_i$ are allowed to be sparse raw counts, a well-known phenomenon in spatial transcriptomics data. Let $\mu_i = \mathbb{E}(y_i)$ denote the spot-specific mean expression. When the gene is not spatially variable, these spot-specific means share a common value $\mu$. Hence, the null hypothesis of interest is
+
+$$
+H_0: \mu_1 = \mu_2 = \cdots = \mu_n = \mu.
+$$ {#eq-null}
+
+If this null hypothesis is rejected, then the gene is said to be spatially variable.
+
+Let
+
+$$
+\delta_{ij} = y_i - y_j
+$$
+
+and let $d_{ij}$ denote the Euclidean distance between spots $i$ and $j$, defined as
+
+$$
+d_{ij} = \sqrt{(s_{i1} - s_{j1})^2 + (s_{i2} - s_{j2})^2}.
+$$
+
+The quantities $\delta_{ij}^2$ and $d_{ij}^2$ measure the dissimilarity in gene expression and the dissimilarity in spatial location, respectively, between spots $i$ and $j$.
+
+Our proposed test statistic for testing the null hypothesis in @eq-null is
+
+$$
+T = \sum_{i < j} \delta_{ij}^2 d_{ij}^2
+  = \langle \boldsymbol{\delta}^2, \mathbf{d}^2 \rangle,
+$$ {#eq-teststat}
+
+where $\boldsymbol{\delta}^2 = \mathrm{vec}(\delta_{ij}^2)$ and $\mathbf{d}^2 = \mathrm{vec}(d_{ij}^2)$. Both $\boldsymbol{\delta}^2$ and $\mathbf{d}^2$ are vectors of length $n(n - 1)/2$.
+
+Under the null hypothesis @eq-null, the expression counts $y_i$ are independently and identically distributed, irrespective of the spatial locations of the spots. To ensure that the proposed method remains fully nonparametric, the $p$-value for the test statistic $T$ is obtained via a permutation procedure.
+
+
+```{r}
+
+# Helper Function to compute statistic
+compute_T <- function(y, D2) {
+  # y: length n vector from gene expression
+  # D2: n x n matrix of squared distances from spatial location
+  
+  y_diff2 <- outer(y, y, "-")^2
+  T <- sum(y_diff2 * D2)
+  return(T)
+}
+
+# Function to test for a svg
+perm_test_one_gene <- function(y, D2, B = 500, seed = NULL) {
+  
+  if (!is.null(seed)) set.seed(seed)
+
+  T_obs <- compute_T(y, D2)
+  n <- length(y)
+
+  # permuted T's
+  T_perm <- replicate(B, {
+    y_perm <- sample(y, n, replace = FALSE)
+    compute_T(y_perm, D2)
+  })
+
+  
+    # -------------------------------
+  # permutation p-value
+  # -------------------------------
+  
+  # mean deviation
+  mu_perm <- mean(T_perm)
+  p_value <- (1 + sum(abs(T_perm-mu_perm) >= abs(T_obs - mu_perm)))/ (B + 1)
+  
+  
+
+  list(
+    T_obs = T_obs,
+    T_perm = T_perm,
+    p_value=  p_value
+  )
+}
+
+
+```
+
+
+# Example
+Testing if a gene "Nrgn" from mOB is svg.
+
+```{r pressure, echo=FALSE}
+data(mOB)
+Y = mOB$counts
+S = mOB$pos
+D2  <- as.matrix(dist(S))
+
+system.time(
+  result <- perm_test_one_gene(
+  y = Y["Nrgn", ],
+  D2 = D2,
+  B = 500, seed = 123))
+
+```
+
+```{r}
+result$T_obs
+result$p_value
+hist(result$T_perm, breaks = 30,
+     main = "Permutation null for T stat",
+     xlab = "T stat")
+abline(v = result$T_obs, col = "red", lwd = 2)
+```
+
+```{r}
+
+```
+
